@@ -11,6 +11,14 @@ def GA_loss(outputs, targets):
     #print('gender loss : {}, age loss : {}'.format(gender_loss, age_loss))
     return (gender_loss + age_loss )/2
 
+def GA_val_loss(outputs, targets):
+    gender_output, age_output = outputs
+    gender_gt, age_gt = targets
+    gender_loss = nn.CrossEntropyLoss()(gender_output,gender_gt)
+    age_loss = nn.CrossEntropyLoss()(age_output,age_gt)
+    #print('gender loss : {}, age loss : {}'.format(gender_loss, age_loss))
+    return gender_loss, age_loss
+
 
 def Front_loss(outputs, targets):
     return nn.CrossEntropyLoss()(outputs, targets)
