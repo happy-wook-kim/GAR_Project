@@ -1,13 +1,14 @@
 import argparse
 from pyexpat import model
 from statistics import mode
+from cv2 import log
 import numpy as np
 from sklearn import model_selection
 import torch
 import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-from loss import Front_loss, GA_loss
+from loss import Front_loss, GA_loss, GA_val_loss
 from model import get_front_model, get_gender_age_model  
 from Dataset import GADataset, FrontDataset
 import time, os, cv2
@@ -44,10 +45,10 @@ def train(model_type):
     #set hyperparameter
     EPOCH = 30
     pre_epoch = 0
-    BATCH_SIZE = 128
+    BATCH_SIZE = 64
     LR = 0.01
 
-    trainloader = DataLoader(train_dataset, batch_size=50, shuffle=True, num_workers=4)
+    trainloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     valloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
     testloader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=2)
 
@@ -68,8 +69,13 @@ def train(model_type):
         print('\nEpoch: %d' % (epoch + 1))
         net.train()
         sum_loss = 0.0
+        sum_age_loss = 0.0
+        sum_gender_loss = 0.0
+        sum_front_loss = 0.0
         correct = 0.0
         total = 0.0
+        last_train_count = 0
+        last_val_count = 0
         for i, data in enumerate(trainloader, 0):
             #prepare dataset
             #print(i)
@@ -93,6 +99,8 @@ def train(model_type):
             
             #print ac & loss in each batch
             sum_loss += loss.item()
+            # print(targets)
+            # print(loss.item())
             if model_type == 'GA':
                 _, gender_predicted = torch.max(outputs[0].data, 1)
                 _, age_predicted = torch.max(outputs[1].data, 1)
@@ -101,6 +109,7 @@ def train(model_type):
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
             #print('[epoch: {}, iter: {}] Loss: {} '.format(epoch+1, (i+1+epoch*length), sum_loss/(i+1))) 
+            last_train_count = i
             
         #get the ac with testdataset in each epoch
         print('Waiting Test...')
@@ -118,7 +127,13 @@ def train(model_type):
                 if model_type == 'GA':
                     inputs, gender, age = data
                     inputs, gender, age = inputs.to(device), gender.to(device), age.to(device)
-                    outputs = net(inputs)
+                    outputs = net(inputs.to(device))
+                    targets = (gender.to(device), age.to(device))
+                    gender_loss, age_loss = GA_val_loss(outputs, targets)
+                    # print(loss.item())
+                    # print(gender_loss.item(), age_loss.item())
+                    sum_gender_loss += gender_loss.item()
+                    sum_age_loss += age_loss.item()
                     _, gender_predicted = torch.max(outputs[0].data, 1)
                     _, age_predicted = torch.max(outputs[1].data, 1)
                     if gender_predicted == gender :
@@ -137,10 +152,14 @@ def train(model_type):
                 count +=1
 
             list_epoch.append(epoch)
-            list_train_loss.append(sum_loss)
+            # print('epoch_list',list_epoch)
+            # print(last_train_count * BATCH_SIZE, count)
+            list_train_loss.append(sum_loss / (last_train_count * BATCH_SIZE))
             if model_type == 'GA':
-                list_gender_acc.append((100* gender_acc)/count)
-                list_age_acc.append((100*age_acc)/count)
+                list_gender_acc.append((sum_gender_loss) / count)
+                list_age_acc.append((sum_age_loss) / count)
+                # print('sum', sum_loss, 'gender',sum_gender_loss, 'age', sum_age_loss)
+                # print('sum', list_train_loss, 'gender',list_gender_acc, 'age', list_age_acc)
                 if best_accuracy < (100 * age_acc / count ) :
                     best_accuracy = (100 * age_acc / count )
                     torch.save(net.state_dict(), './models/' + str(model_type) + pth_name)
@@ -153,9 +172,9 @@ def train(model_type):
                 # print('list_gender_acc: ',list_gender_acc)
                 # print('list_age_acc: ',list_age_acc)
                 if (epoch+1) % EPOCH == 0 :
-                    make_graph(list_epoch, list_train_loss, list_gender_acc, list_age_acc, 'train loss', 'gender validation', 'age validation')
+                    make_graph(list_epoch, list_train_loss, list_gender_acc, list_age_acc, 'train loss', 'gender validation loss', 'age validation loss')
             elif model_type == 'Front':
-                list_front_acc.append((100*front_acc)/count)
+                list_front_acc.append((front_acc))
                 if best_accuracy < (100 * front_acc / count ) :
                     best_accuracy = (100 * front_acc / count )
                     torch.save(net.state_dict(), './models/' + str(model_type) + pth_name)
@@ -163,7 +182,7 @@ def train(model_type):
                     print('saved at: /models/Front' + pth_name)
                 print('Test\'s ac is: front {}'.format((100*front_acc/count)))
                 if (epoch+1) % EPOCH == 0 :
-                    make_graph(list_epoch, list_train_loss, list_front_acc, list_front_acc, 'train loss', 'front validation', 'front validation')
+                    make_graph(list_epoch, list_train_loss, list_front_acc, list_front_acc, 'train loss', 'front validation loss', 'front validation loss')
 
     #torch.save(net.)
     print('Train has finished, total epoch is %d' % EPOCH)
